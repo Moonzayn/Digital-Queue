@@ -118,7 +118,7 @@
                 <p id="confirmSlotTime" class="text-2xl font-bold text-primary"></p>
                 <p id="confirmSlotDate" class="text-sm text-text-muted mt-1"></p>
             </div>
-            <div class="bg-amber-50 border border-amber-100 rounded-xl p-3 mb-5">
+<div class="bg-amber-50 border border-amber-100 rounded-xl p-3 mb-5">
                 <p class="text-xs text-amber-700 font-medium">⚠️ Harap datang tepat waktu. Booking otomatis dibatalkan jika telat {{ config('queue_settings.late_tolerance_minutes', 10) }} menit.</p>
             </div>
             <button onclick="confirmBooking()" id="confirmBookBtn" class="w-full bg-primary hover:bg-primary-dark text-white font-semibold py-4 rounded-xl transition-all scale-press text-base disabled:opacity-50">
@@ -137,6 +137,51 @@
             <p class="mt-4 text-sm font-medium text-text-muted">Memproses...</p>
         </div>
     </div>
+</div>
+
+<!-- Scan Modal -->
+<div id="scanModal" class="fixed inset-0 z-50 hidden">
+    <div class="absolute inset-0 bg-black/40 glass" onclick="hideScanModal()"></div>
+    <div class="absolute bottom-0 left-0 right-0 bg-white rounded-t-3xl p-6 pb-8 max-w-lg mx-auto slide-up">
+        <div class="w-10 h-1 bg-gray-300 rounded-full mx-auto mb-6"></div>
+        <h3 class="text-lg font-bold text-text-main mb-3">Scan QR Code</h3>
+        <p class="text-sm text-text-muted mb-4">Scan QR code dari tiket booking Anda untuk mengamankan prioritas.</p>
+        <div class="bg-surface rounded-xl p-4 mb-4">
+            <p class="text-sm font-medium text-text-main mb-2">Petunjuk:</p>
+            <ul class="text-sm text-text-muted space-y-1">
+                <li>Scan QR code dari tiket booking Anda</li>
+                <li>Pastikan scan dilakukan minimal 10 menit sebelum jadwal</li>
+                <li>Scan terlambat akan kehilangan prioritas</li>
+            </ul>
+        </div>
+        <div class="flex gap-3">
+            <button onclick="startScan()" class="flex-1 bg-primary hover:bg-primary-dark text-white font-semibold py-3 rounded-xl transition-all">
+                <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>
+                Mulai Scan
+            </button>
+            <button onclick="hideScanModal()" class="flex-1 bg-gray-100 hover:bg-gray-200 text-text-main font-semibold py-3 rounded-xl transition-all">
+                Batal
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Scan Result Modal -->
+<div id="scanResultModal" class="fixed inset-0 z-50 hidden">
+    <div class="absolute inset-0 bg-black/40 glass" onclick="hideScanResultModal()"></div>
+    <div class="absolute inset-0 flex items-center justify-center">
+        <div class="bg-white rounded-2xl p-6 max-w-sm w-full">
+            <div class="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <svg class="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+            </div>
+            <h3 id="scanResultTitle" class="text-lg font-bold text-text-main text-center mb-2">Scan Berhasil</h3>
+            <p id="scanResultMessage" class="text-sm text-text-muted text-center mb-4"></p>
+            <button onclick="hideScanResultModal()" class="w-full bg-primary hover:bg-primary-dark text-white font-semibold py-3 rounded-xl transition-all">
+                Tutup
+            </button>
+        </div>
+    </div>
+</div>
 </div>
 @endsection
 
@@ -253,5 +298,52 @@ function refreshSlots() {
 }
 
 setInterval(function() { if (!document.hidden) refreshSlots(); }, 10000);
+
+// Scan functionality
+function startScan() {
+    hideScanModal();
+    hideScanResultModal();
+
+    // Simulate QR code scanning (in real implementation, this would use a QR scanner)
+    var ticketCode = prompt("Masukkan kode unik tiket Anda:");
+    if (!ticketCode) return;
+
+    var lo = document.getElementById('loadingOverlay');
+    lo.classList.remove('hidden'); lo.classList.add('flex');
+
+    fetch('/api/online-scan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': CSRF, 'Accept': 'application/json' },
+        body: JSON.stringify({ unique_code: ticketCode, customer_name: '' })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        lo.classList.add('hidden'); lo.classList.remove('flex');
+
+        if (data.success) {
+            document.getElementById('scanResultTitle').textContent = 'Scan Berhasil';
+            document.getElementById('scanResultMessage').textContent = data.message;
+            localStorage.setItem('dq_active_ticket', JSON.stringify(data.ticket));
+        } else {
+            document.getElementById('scanResultTitle').textContent = 'Scan Gagal';
+            document.getElementById('scanResultMessage').textContent = data.message || 'Terjadi kesalahan saat scan.';
+        }
+        document.getElementById('scanResultModal').classList.remove('hidden');
+    })
+    .catch(function() {
+        lo.classList.add('hidden'); lo.classList.remove('flex');
+        document.getElementById('scanResultTitle').textContent = 'Scan Gagal';
+        document.getElementById('scanResultMessage').textContent = 'Network error';
+        document.getElementById('scanResultModal').classList.remove('hidden');
+    });
+}
+
+function hideScanModal() {
+    document.getElementById('scanModal').classList.add('hidden');
+}
+
+function hideScanResultModal() {
+    document.getElementById('scanResultModal').classList.add('hidden');
+}
 </script>
 @endsection

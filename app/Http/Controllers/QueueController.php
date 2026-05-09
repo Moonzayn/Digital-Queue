@@ -12,7 +12,7 @@ use Carbon\Carbon;
 
 class QueueController extends Controller
 {
-    // ==========================================
+// ==========================================
     // USER PAGES
     // ==========================================
 
@@ -25,6 +25,11 @@ class QueueController extends Controller
         $settings = Setting::allAsArray();
 
         return view('index', compact('currentServing', 'waitingCount', 'reservedCount', 'settings'));
+    }
+public function booking()
+    {
+        $slots = $this->getTimeSlots()->getData()->slots;
+        return view('booking', ['slots' => $slots]);
     }
 
     public function showTicket(string $uniqueCode)
@@ -44,6 +49,53 @@ class QueueController extends Controller
         }
 
         return view('scan', ['token' => strtoupper(trim($token))]);
+    }
+
+    // ==========================================
+    // ONLINE SCANNING
+    // ==========================================
+
+    public function onlineScan(Request $request): JsonResponse
+    {
+        $request->validate([
+            'unique_code' => 'required|string|max:64',
+            'customer_name' => 'required|string|max:100|min:2',
+        ]);
+
+        $ticket = Queue::where('unique_code', $request->input('unique_code'))
+            ->where('type', 'online')
+            ->where('status', 'reserved')
+            ->first();
+
+        if (!$ticket) {
+            return response()->json(['success' => false, 'message' => 'Ticket tidak ditemukan atau tidak valid.'], 404);
+        }
+
+        $scanTime = now();
+        $isOnTime = $scanTime->lte($ticket->scheduled_at);
+
+        // Update ticket with scan time
+        $ticket->update([
+            'scan_time' => $scanTime,
+            'customer_name' => trim($request->input('customer_name')),
+        ]);
+
+        // If scanned late, treat as walk-in
+        if (!$isOnTime) {
+            $ticket->update(['status' => 'waiting']);
+            return response()->json([
+                'success' => true,
+                'message' => 'Ticket discan (terlambat). Diperlakukan sebagai walk-in.',
+                'ticket' => $this->fmt($ticket),
+            ]);
+        }
+
+        // If scanned on time, keep as reserved until 10 min before
+        return response()->json([
+            'success' => true,
+            'message' => 'Ticket discan (on time).',
+            'ticket' => $this->fmt($ticket),
+        ]);
     }
 
     // ==========================================

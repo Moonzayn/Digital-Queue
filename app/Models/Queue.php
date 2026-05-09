@@ -61,7 +61,7 @@ class Queue extends Model
         return in_array($this->status, ['waiting', 'reserved', 'serving']);
     }
 
-        public function getPositionAttribute(): int
+public function getPositionAttribute(): int
     {
         if ($this->status === 'serving') {
             return 0;
@@ -70,28 +70,83 @@ class Queue extends Model
             return 0;
         }
 
-        // Determine this ticket's sort time
-        $mySortTime = ($this->type === 'online' && $this->scheduled_at)
-            ? $this->scheduled_at
-            : $this->created_at;
+        // Determine this ticket's sort time and priority
+        $sortTime = null;
+        $priority = 0; // 0 = walk-in, 1 = online on time, 2 = online late
+
+        if ($this->type === 'online') {
+            if ($this->scheduled_at && $this->scan_time) {
+                // Online user scanned on time
+                if ($this->scan_time->lte($this->scheduled_at)) {
+                    $sortTime = $this->scan_time;
+                    $priority = 1;
+                } else {
+                    // Online user scanned late - treated as walk-in
+                    $sortTime = $this->scan_time;
+                    $priority = 2;
+                }
+            } elseif ($this->scheduled_at) {
+                // Online user reserved but not scanned yet
+                $sortTime = $this->scheduled_at;
+                $priority = 1;
+            } else {
+                // Online user without scheduled time (edge case)
+                $sortTime = $this->created_at;
+                $priority = 1;
+            }
+        } else {
+            // Walk-in user
+            $sortTime = $this->created_at;
+            $priority = 0;
+        }
 
         return self::today()
             ->whereIn('status', ['waiting', 'reserved'])
-            ->where(function ($query) use ($mySortTime) {
+            ->where(function ($query) use ($sortTime, $priority) {
                 $query->whereRaw("
-                    CASE WHEN type = 'online' AND scheduled_at IS NOT NULL
-                        THEN scheduled_at
-                        ELSE created_at
+                    CASE
+                        WHEN type = 'online' AND scheduled_at IS NOT NULL AND scan_time IS NOT NULL
+                            THEN CASE
+                                WHEN scan_time <= scheduled_at THEN 1
+                                ELSE 2
+                            END
+                        WHEN type = 'online' AND scheduled_at IS NOT NULL THEN 1
+                        ELSE 0
                     END < ?
-                ", [$mySortTime])
-                ->orWhere(function ($q) use ($mySortTime) {
+                ", [$priority])
+                ->orWhere(function ($q) use ($sortTime, $priority) {
                     $q->whereRaw("
-                        CASE WHEN type = 'online' AND scheduled_at IS NOT NULL
-                            THEN scheduled_at
-                            ELSE created_at
+                        CASE
+                            WHEN type = 'online' AND scheduled_at IS NOT NULL AND scan_time IS NOT NULL
+                                THEN CASE
+                                    WHEN scan_time <= scheduled_at THEN 1
+                                    ELSE 2
+                                END
+                            WHEN type = 'online' AND scheduled_at IS NOT NULL THEN 1
+                            ELSE 0
                         END = ?
-                    ", [$mySortTime])
-                    ->where('id', '<', $this->id);
+                    ", [$priority])
+                    ->whereRaw("
+                        CASE
+                            WHEN type = 'online' AND scheduled_at IS NOT NULL AND scan_time IS NOT NULL
+                                THEN scan_time
+                            WHEN type = 'online' AND scheduled_at IS NOT NULL
+                                THEN scheduled_at
+                            ELSE created_at
+                        END < ?
+                    ", [$sortTime])
+                    ->orWhere(function ($q2) use ($sortTime, $priority) {
+                        $q2->whereRaw("
+                            CASE
+                                WHEN type = 'online' AND scheduled_at IS NOT NULL AND scan_time IS NOT NULL
+                                    THEN scan_time
+                                WHEN type = 'online' AND scheduled_at IS NOT NULL
+                                    THEN scheduled_at
+                                ELSE created_at
+                            END = ?
+                        ", [$sortTime])
+                        ->where('id', '<', $this->id);
+                    });
                 });
             })
             ->count() + 1;

@@ -5,6 +5,7 @@ use App\Http\Controllers\QueueController;
 
 // USER
 Route::get('/', [QueueController::class, 'index'])->name('home');
+Route::get('/booking', [QueueController::class, 'booking'])->name('booking');
 Route::get('/walk-in/{token}', [QueueController::class, 'scanLanding'])->name('scan.landing');
 Route::post('/queue/walk-in', [QueueController::class, 'walkIn'])->name('queue.walkin');
 Route::post('/queue/book-online', [QueueController::class, 'bookOnline'])->name('queue.book');
